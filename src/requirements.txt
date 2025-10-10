@@ -12,3 +12,4 @@ nltk
 peft
 sentencepiece
 tqdm
+evaluate
