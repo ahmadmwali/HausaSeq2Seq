@@ -375,3 +375,41 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Example Usage:
+#
+# Basic usage with a T5-like full model on a TSV file:
+# python predict_on_dataframe.py \
+#     --model_type t5 \
+#     --hub_model_id custom/t5-hausa-typo-corrector \
+#     --input_file ./data/noisy_validation.tsv \
+#     --output_file ./results/t5_predictions.tsv \
+#     --input_text_column Noisy \
+#     --prediction_column_name T5_Correction \
+#     --max_new_tokens 150 \
+#     --num_beams 5 \
+#     --prediction_batch_size 16
+#
+# Usage with an mBART/M2M100 LoRA adapter on a CSV file:
+# python predict_on_dataframe.py \
+#     --model_type bart \
+#     --hub_model_id custom/mbart-ha-lora-adapter \
+#     --is_lora_adapter \
+#     --base_model_name_for_lora facebook/mbart-large-50-many-to-many-mmt \
+#     --input_file ./data/noisy_test.csv \
+#     --output_file ./results/lora_mbart_predictions.csv \
+#     --input_text_column corrupted_text \
+#     --prediction_column_name LoRA_Correction \
+#     --file_separator , \
+#     --source_lang_code ha_NG \
+#     --target_lang_code ha_NG \
+#     --hf_token "hf_YOUR_API_TOKEN"
+#
+# Usage with Google Drive mount (for Colab environments):
+# python predict_on_dataframe.py \
+#     --model_type t5 \
+#     --hub_model_id custom/t5-base-corrector \
+#     --input_file /content/drive/MyDrive/data/test_data.tsv \
+#     --output_file /content/drive/MyDrive/results/t5_output.tsv \
+#     --input_text_column sentence \
+#     --mount_drive
