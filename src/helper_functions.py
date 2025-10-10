@@ -7,7 +7,7 @@ from nltk.translate import meteor_score
 from jiwer import wer
 
 tokenizer_instance = None
-g_max_seq_length = None 
+g_max_seq_length = None # Global for max_seq_length, set by main script
 
 def set_global_tokenizer_and_config(tokenizer, max_seq_length_val):
     """Sets the global tokenizer instance and max_seq_length."""
@@ -130,6 +130,7 @@ def preprocess_test_function(examples, model_type_for_preprocessing, input_colum
     clean_texts = [str(text) if text is not None else "" for text in examples[target_column]]
 
     model_inputs = tokenizer_instance(noisy_texts, padding="max_length", truncation=True, max_length=g_max_seq_length)
+    # labels = tokenizer_instance(clean_texts, padding="max_length", truncation=True, max_length=g_max_seq_length)
 
     if model_type_for_preprocessing == "bart":
         try:
@@ -153,15 +154,16 @@ def preprocess_function(examples, max_seq_length, model_type):
     noisy_texts = [str(text) if text is not None else "" for text in examples['Noisy']]
     clean_texts = [str(text) if text is not None else "" for text in examples['Clean']]
 
-    # For mBART/M2M100, tokenizer uses src_lang for inputs
+    # For mBART family, tokenizer uses src_lang for inputs
+    # For T5, no special context manager is typically needed for target tokenization.
     inputs = tokenizer_instance(noisy_texts, padding="max_length", truncation=True, max_length=max_seq_length)
+    # targets = tokenizer_instance(clean_texts, padding="max_length", truncation=True, max_length=max_seq_length)
 
-    if model_type == "bart":
+    if model_type == "bart": # mBART family specific target tokenization
         with tokenizer_instance.as_target_tokenizer():
             targets = tokenizer_instance(clean_texts, padding="max_length", truncation=True, max_length=max_seq_length)
     else: # T5 and other models
         targets = tokenizer_instance(clean_texts, padding="max_length", truncation=True, max_length=max_seq_length)
-
 
     inputs['labels'] = targets['input_ids']
     return inputs
