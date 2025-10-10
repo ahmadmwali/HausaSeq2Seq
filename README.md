@@ -40,7 +40,7 @@ pip install -r requirements.txt
 
 The files used for training, validation, testing, and downstream evaluation are available for download.
 
-**Download Link**: {insert your Google Drive link here}
+**Download Link**: {https://drive.google.com/drive/folders/1dZxaEQXA3yBP4aiWX5ZeXF3ciN-0OSEn?usp=sharing}
 
 Please download the data and place it in a `Files/` directory at the root of the project, or update the file paths in the scripts accordingly.
 
