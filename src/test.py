@@ -22,13 +22,15 @@ from transformers import (
 from datasets import Dataset
 from huggingface_hub import login
 
+# Import helper functions
 from helper_functions import (
     download_nltk_data,
     compute_metrics,
-    preprocess_test_function,
+    preprocess_test_function, 
     set_global_tokenizer_and_config
 )
 
+# Conditional import for LoRA
 try:
     from peft import PeftModel, PeftConfig
     PEFT_AVAILABLE = True
@@ -83,7 +85,7 @@ def parse_args():
     parser.add_argument(
         "--test_size",
         type=int,
-        default=None, 
+        default=None, # Default to None to use all test data for evaluation metrics
         help="Number of test samples to use for evaluation (None for all). This also limits the pool for random sample logging."
     )
     parser.add_argument(
@@ -116,6 +118,7 @@ def parse_args():
         default=10,
         help="Number of random input/output examples to generate and save."
     )
+    # BART/M2M100 specific tokenizer params
     parser.add_argument(
         "--source_lang_code",
         type=str,
@@ -175,11 +178,20 @@ def main():
             print(f"Hugging Face login failed: {e}. Proceeding without explicit login.")
 
     # --- Directories and Paths ---
+    # model_name_for_path = args.hub_model_id.split('/')[-1]
+    # if args.is_lora_adapter:
+    #     model_name_for_path += "-lora_eval"
+    # else:
+    #     model_name_for_path += "-full_eval"
+
+    # --- Directories and Paths ---
     model_name_for_path = args.hub_model_id.split('/')[-1]
-    if args.is_lora_adapter:
-        model_name_for_path += "-lora_eval"
-    else:
-        model_name_for_path += "-full_eval"
+    # if args.is_lora_adapter:
+    #     model_name_for_path += "-lora" 
+    # else:
+    #     model_name_for_path += "-full"  
+
+    current_test_results_dir = os.path.join(args.results_dir_base, model_name_for_path)
 
     current_test_results_dir = os.path.join(args.results_dir_base, model_name_for_path)
     os.makedirs(current_test_results_dir, exist_ok=True)
@@ -197,6 +209,7 @@ def main():
         test_df_eval = test_df_full.copy()
         if args.test_size is not None and args.test_size > 0 and args.test_size < len(test_df_eval):
             print(f"Limiting evaluation data to {args.test_size} samples (randomly sampled).")
+            # Sample for evaluation to ensure variety if subsetting
             test_df_eval = test_df_eval.sample(n=args.test_size, random_state=42).reset_index(drop=True)
         elif args.test_size is not None and args.test_size <= 0 :
              print(f"Warning: test_size ({args.test_size}) for evaluation is not positive. Using full dataset for evaluation.")
@@ -215,7 +228,6 @@ def main():
             raise ValueError("Evaluation dataset is empty after cleaning or due to test_size.")
         
         print(f"Using {len(test_df_eval)} samples for evaluation metrics.")
-        # This dataset is used for trainer.evaluate()
         eval_dataset_hf = Dataset.from_pandas(test_df_eval)
         test_dataset_for_sampling_hf = Dataset.from_pandas(
             test_df_full.dropna(subset=required_columns).reset_index(drop=True)
@@ -259,7 +271,7 @@ def main():
             base_model = AutoModelForSeq2SeqLM.from_pretrained(base_model_name_resolved, **model_load_args)
             model = PeftModel.from_pretrained(base_model, args.hub_model_id, token=args.hf_token)
             print("LoRA model loaded successfully.")
-        else:
+        else: # Full model
             tokenizer = AutoTokenizer.from_pretrained(args.hub_model_id, **tokenizer_load_args)
             model = AutoModelForSeq2SeqLM.from_pretrained(args.hub_model_id, **model_load_args)
             print("Full model loaded successfully.")
@@ -302,6 +314,7 @@ def main():
 
     print("\n--- Tokenizing Evaluation Dataset ---")
     try:
+        # Tokenize the dataset that will be used for evaluation metrics
         tokenized_eval_dataset = eval_dataset_hf.map(
             lambda ex: preprocess_test_function(ex, model_type_for_preprocessing=args.model_type, input_column=args.input_column_name, target_column=args.target_column_name),
             batched=True,
@@ -353,6 +366,7 @@ def main():
     # --- Generating and Logging Sample Predictions ---
     if evaluation_successful: # Proceed only if evaluation itself didn't crash
         print("\n--- Generating and Logging Sample Predictions ---")
+        # Use test_dataset_for_sampling_hf as the pool for random samples
         num_samples_to_actually_log = min(args.num_samples_to_log, len(test_dataset_for_sampling_hf))
 
         if num_samples_to_actually_log == 0:
@@ -373,6 +387,7 @@ def main():
                     f.write("="*50 + "\n\n")
 
                     for i, idx in enumerate(tqdm(random_indices, desc="Generating Samples for Log")):
+                        # Get sample from the original Hugging Face Dataset object
                         sample_data = test_dataset_for_sampling_hf[idx]
                         input_text = sample_data[args.input_column_name]
                         reference_text = sample_data[args.target_column_name]
@@ -381,16 +396,17 @@ def main():
                         inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True, max_length=args.max_seq_length).to(device)
                         try:
                             with torch.no_grad():
-                                outputs = model.generate(inputs.input_ids, generation_config=model.generation_config)
+                                # outputs = model.generate(inputs.input_ids, generation_config=model.generation_config)
+                                outputs = model.generate(**inputs, generation_config=model.generation_config)
                             prediction = tokenizer.decode(outputs[0], skip_special_tokens=True)
                         except Exception as gen_e:
                             prediction = f"Error during generation for sample: {gen_e}"
                         
                         f.write(f"--- Sample {i+1} (Original Index in Sampling Pool: {idx}) ---\n")
-                        f.write(f"Input ({args.input_column_name}):     {input_text}\n")
-                        f.write(f"Prediction:        {prediction.strip()}\n")
+                        f.write(f"Input ({args.input_column_name}):      {input_text}\n")
+                        f.write(f"Prediction:          {prediction.strip()}\n")
                         f.write(f"Reference ({args.target_column_name}): {reference_text}\n\n")
-                print(f"Sample predictions logged to {sample_output_file}")
+                    print(f"Sample predictions logged to {sample_output_file}")
             except Exception as sample_e:
                 print(f"Error during sample logging: {sample_e}")
                 import traceback
@@ -402,3 +418,41 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Example Usage:
+#
+# 1. Testing a Full Fine-tuned T5 model from the Hub:
+# python test.py \
+#     --model_type t5 \
+#     --hub_model_id ahmadmwali/harmonized-afriteva_small-full \
+#     --test_file ./data/test.tsv \
+#     --results_dir_base ./t5_full_test_results \
+#     --eval_batch_size 16 \
+#     --max_seq_length 128 \
+#     --max_new_tokens 128 \
+#     --num_beams 4
+#
+# 2. Testing a LoRA Adapter on an mBART model (requires base model name):
+# python test.py \
+#     --model_type bart \
+#     --hub_model_id ahmadmwali/harmonized-m2m100_418M-lora-ha \
+#     --is_lora_adapter \
+#     --base_model_name_for_lora facebook/m2m100_418M \
+#     --test_file /content/drive/MyDrive/Thesis_Data/test.tsv \
+#     --mount_drive \
+#     --source_lang_code ha_NG \
+#     --target_lang_code ha_NG \
+#     --eval_batch_size 8 \
+#     --max_seq_length 256 \
+#     --max_new_tokens 256 \
+#     --num_beams 5 \
+#     --test_size 1000 # Use a subset for faster testing
+#
+# 3. Testing a Full Fine-tuned T5 model using an explicit Hugging Face Token (for private repo):
+# python test.py \
+#     --model_type t5 \
+#     --hub_model_id your-username/my-private-t5-corrector \
+#     --hf_token "hf_YOUR_API_TOKEN" \
+#     --test_file ./data/test.tsv \
+#     --results_dir_base ./t5_private_test_results \
+#     --num_samples_to_log 20
