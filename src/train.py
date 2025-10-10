@@ -43,7 +43,7 @@ def parse_args():
         type=str,
         required=True,
         choices=["bart", "t5"],
-        help="Type of model to train ('bart' for mBART/M2M100, 't5' for T5-like models)."
+        help="Type of model to train ('bart' for mBART models, 't5' for T5-like models)."
     )
     parser.add_argument(
         "--base_model_name",
@@ -83,7 +83,7 @@ def parse_args():
     parser.add_argument(
         "--hf_token",
         type=str,
-        default=None, # Replace with your token or set as environment variable
+        default=None,
         help="Hugging Face API token. If not provided, attempts login or uses cached token."
     )
     parser.add_argument(
@@ -98,9 +98,9 @@ def parse_args():
     parser.add_argument("--max_seq_length", type=int, default=256, help="Max sequence length for tokenizer.")
     parser.add_argument("--max_new_tokens", type=int, default=256, help="Max new tokens for generation during evaluation.")
 
-    # mBART/M2M100 specific tokenizer params (only used if model_type is 'bart')
-    parser.add_argument("--source_lang_code", type=str, default="ha", help="Source language code for mBART/M2M100 (e.g., 'ha', 'en_XX').")
-    parser.add_argument("--target_lang_code", type=str, default="ha", help="Target language code for mBART/M2M100 (e.g., 'ha', 'en_XX').")
+    # mBART specific tokenizer params (only used if model_type is 'bart')
+    parser.add_argument("--source_lang_code", type=str, default="ha", help="Source language code for mBART (e.g., 'ha', 'en_XX').")
+    parser.add_argument("--target_lang_code", type=str, default="ha", help="Target language code for mBART (e.g., 'ha', 'en_XX').")
 
     # Training hyperparameters
     parser.add_argument("--learning_rate", type=float, default=2e-5, help="Learning rate.")
@@ -115,7 +115,6 @@ def parse_args():
     parser.add_argument("--lora_r", type=int, default=16, help="LoRA rank.")
     parser.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha.")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout.")
-    # Note: LORA_TARGET_MODULES will be set based on model_type
 
     # Drive mount (Colab specific)
     parser.add_argument("--mount_drive", action="store_true", help="Mount Google Drive (for Colab).")
@@ -131,7 +130,6 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Mount Google Drive if in Colab and specified
     if args.mount_drive:
         try:
             from google.colab import drive
@@ -144,7 +142,7 @@ def main():
             print("Google Colab 'drive' module not found. Skipping drive mount.")
             pass
 
-    # Ignore specific warnings
+    # Ignore warnings
     warnings.simplefilter("ignore", category=DeprecationWarning)
     warnings.filterwarnings("ignore", message="Using the `WANDB_DISABLED` environment variable is deprecated")
 
@@ -167,10 +165,8 @@ def main():
     # --- Directories and Paths ---
     os.makedirs(args.output_dir_base, exist_ok=True)
     model_suffix = f"{args.base_model_name.split('/')[-1]}"
-    model_suffix += "-lora" if args.use_lora else "-full"
     model_output_path = os.path.join(args.output_dir_base, model_suffix)
-    hub_model_id = f"{args.hub_model_id_prefix}-{args.model_type}-{model_suffix}" if args.push_to_hub else None
-
+    hub_model_id = f"{args.hub_model_id_prefix}"
     print(f"Model Type: {args.model_type.upper()}")
     print(f"Base Model: {args.base_model_name}")
     print(f"Using LoRA: {args.use_lora}")
@@ -229,25 +225,24 @@ def main():
 
     model = AutoModelForSeq2SeqLM.from_pretrained(args.base_model_name)
 
-    # --- LoRA Configuration (if applicable) ---
+    # --- LoRA Configuration ---
     if args.use_lora:
-        if not PEFT_AVAILABLE: # Should have been caught by argparser, but double check
+        if not PEFT_AVAILABLE:
              print("Error: PEFT library not available for LoRA. Exiting.")
              exit(1)
         print("\n--- Configuring LoRA ---")
         # Determine LORA_TARGET_MODULES based on model_type
-        if args.model_type == "bart": # mBART, M2M100 are BART-like
+        if args.model_type == "bart":
             lora_target_modules = ["q_proj", "v_proj"] # Common for BART architectures
         elif args.model_type == "t5":
-            lora_target_modules = ["q", "v"] # Common for T5 architectures
+            # lora_target_modules = ["q", "v"] # Common for T5 architectures
+            lora_target_modules = ["q_proj", "v_proj"]
         else:
             print(f"Warning: LoRA target modules not pre-defined for model_type '{args.model_type}'. Using default T5 targets. This might need adjustment.")
             lora_target_modules = ["q", "v"]
         print(f"LoRA Target Modules: {lora_target_modules}")
 
-        # Optional: Prepare model for k-bit training (e.g., for QLoRA or gradient checkpointing)
-        # model = prepare_model_for_kbit_training(model) # Uncomment if using gradient_checkpointing=True or QLoRA
-
+        
         lora_config = LoraConfig(
             r=args.lora_r,
             lora_alpha=args.lora_alpha,
@@ -313,35 +308,65 @@ def main():
     print("\n--- Setting Up Training ---")
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
 
+    # training_args_dict = {
+    #     "output_dir": model_output_path,
+    #     "eval_strategy": "epoch",
+    #     "learning_rate": effective_learning_rate,
+    #     "per_device_train_batch_size": args.train_batch_size,
+    #     "per_device_eval_batch_size": args.eval_batch_size,
+    #     "gradient_accumulation_steps": args.gradient_accumulation_steps,
+    #     "weight_decay": args.weight_decay,
+    #     "num_train_epochs": args.num_epochs,
+    #     # "fp16": torch.cuda.is_available(),
+    #     "fp16": False,
+    #     "predict_with_generate": True,
+    #     "logging_dir": os.path.join(model_output_path, 'logs'),
+    #     "logging_strategy": "steps",
+    #     "disable_tqdm": False,
+    #     "logging_steps": 50,
+    #     "save_strategy": "epoch",
+    #     "save_total_limit": 2,
+    #     "load_best_model_at_end": True,
+    #     "metric_for_best_model": "eval_loss", 
+    #     "greater_is_better": False, 
+    #     "generation_config": model.generation_config,
+    #     "report_to": ["tensorboard"],
+    #     "max_grad_norm": 1.0
+    # }
+
     training_args_dict = {
-        "output_dir": model_output_path,
-        "eval_strategy": "epoch",
-        "learning_rate": effective_learning_rate,
-        "per_device_train_batch_size": args.train_batch_size,
-        "per_device_eval_batch_size": args.eval_batch_size,
-        "gradient_accumulation_steps": args.gradient_accumulation_steps,
-        "weight_decay": args.weight_decay,
-        "num_train_epochs": args.num_epochs,
-        "fp16": torch.cuda.is_available(),
-        "predict_with_generate": True,
-        "logging_dir": os.path.join(model_output_path, 'logs'),
-        "logging_strategy": "steps",
-        "disable_tqdm": False,
-        "logging_steps": 50,
-        "save_strategy": "epoch",
-        "save_total_limit": 2,
-        "load_best_model_at_end": True,
-        "metric_for_best_model": "eval_loss", # or another metric like "eval_bleu" if preferred
-        "greater_is_better": False, # True if metric_for_best_model is BLEU/METEOR etc.
-        "generation_config": model.generation_config,
-        "report_to": ["tensorboard"],
+    "output_dir": model_output_path,
+    "eval_strategy": "epoch",
+    "learning_rate": effective_learning_rate * 0.5,  # Reduce learning rate by half
+    "per_device_train_batch_size": max(1, args.train_batch_size // 2),  # Reduce batch size
+    "per_device_eval_batch_size": args.eval_batch_size,
+    "gradient_accumulation_steps": args.gradient_accumulation_steps * 2,  # Compensate for smaller batch
+    "weight_decay": args.weight_decay,
+    "num_train_epochs": args.num_epochs,
+    "fp16": False,  # Disable fp16
+    "dataloader_pin_memory": False,  # Reduce memory pressure
+    "predict_with_generate": True,
+    "logging_dir": os.path.join(model_output_path, 'logs'),
+    "logging_strategy": "steps",
+    "disable_tqdm": False,
+    "logging_steps": 50,
+    "save_strategy": "epoch",
+    "save_total_limit": 2,
+    "load_best_model_at_end": True,
+    "metric_for_best_model": "eval_loss", 
+    "greater_is_better": False, 
+    "generation_config": model.generation_config,
+    "report_to": ["tensorboard"],
+    "max_grad_norm": 0.5,  # Stricter gradient clipping
+    "warmup_steps": 100,  # Add warmup steps
+    "logging_first_step": True,
+    "skip_memory_metrics": True,  # Reduce memory overhead
     }
 
     if args.push_to_hub and hub_model_id:
         training_args_dict["push_to_hub"] = True
         training_args_dict["hub_model_id"] = hub_model_id
         training_args_dict["hub_strategy"] = "end"
-        # hub_token is handled by login() or TrainingArguments picks up env var / cached token
         if args.hf_token: # Explicitly pass if provided
              training_args_dict["hub_token"] = args.hf_token
 
@@ -356,7 +381,7 @@ def main():
         eval_dataset=tokenized_val,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=compute_metrics, # Uses global tokenizer set earlier
+        compute_metrics=compute_metrics,
     )
 
     print("\nTrainer initialized. Starting training...")
@@ -388,16 +413,36 @@ def main():
         # Trainer handles push_to_hub for the model/adapters if configured.
         # For LoRA, it pushes adapters. For full fine-tuning, it pushes the full model.
         # We might still want to push the tokenizer separately, especially for LoRA.
+        # if args.push_to_hub and hub_model_id:
+        #    print(f"\nTrainer was configured to push to Hub ID: {hub_model_id}")
+        #    print(f"Check repository status at: https://huggingface.co/{hub_model_id}")
+        #    if args.use_lora: # For LoRA, also push the tokenizer for convenience
+        #        try:
+        #            print(f"Attempting to push tokenizer to {hub_model_id}...")
+        #            tokenizer.push_to_hub(hub_model_id, token=args.hf_token if args.hf_token else None)
+        #            print("Tokenizer pushed successfully.")
+        #        except Exception as e:
+        #            print(f"Error pushing tokenizer: {e}")
+        # else:
+        #    print("\nPush to Hub was disabled or Hub ID not set. Model/adapters saved locally.")
+
+        # --- Push to Hub after training ---
         if args.push_to_hub and hub_model_id:
             print(f"\nTrainer was configured to push to Hub ID: {hub_model_id}")
             print(f"Check repository status at: https://huggingface.co/{hub_model_id}")
-            if args.use_lora: # For LoRA, also push the tokenizer for convenience
-                try:
-                    print(f"Attempting to push tokenizer to {hub_model_id}...")
-                    tokenizer.push_to_hub(hub_model_id, token=args.hf_token if args.hf_token else None)
-                    print("Tokenizer pushed successfully.")
-                except Exception as e:
-                    print(f"Error pushing tokenizer: {e}")
+            
+            try:
+                # Manually push model, tokenizer, adapter (if any)
+                print("Pushing model and tokenizer to Hugging Face Hub...")
+                trainer.push_to_hub(
+                    commit_message="End of training",
+                    token=args.hf_token if args.hf_token else None,
+                )
+                print(f"Model pushed to {hub_model_id} on Hugging Face Hub.")
+
+            except Exception as e:
+                print(f"Error pushing to Hub: {e}")
+                print("You might need to run `notebook_login()` again or check your Hub token and model ID.")
         else:
             print("\nPush to Hub was disabled or Hub ID not set. Model/adapters saved locally.")
 
@@ -407,7 +452,57 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
-        print(f"\n--- Harmonized Training Script Finished ---")
+        print(f"\n--- Training Script Finished ---")
 
 if __name__ == "__main__":
     main()
+
+# Example Usage:
+#
+# Full fine-tuning of a T5 model on a local file:
+# python train.py \
+#     --model_type t5 \
+#     --base_model_name castorini/afriteva_small \
+#     --train_file ./data/train.tsv \
+#     --val_file ./data/validation.tsv \
+#     --output_dir_base ./t5_full_finetune_results \
+#     --learning_rate 3e-5 \
+#     --train_batch_size 8 \
+#     --eval_batch_size 16 \
+#     --num_epochs 3 \
+#     --max_seq_length 128
+#
+# LoRA fine-tuning of an mBART model, pushing to Hugging Face Hub (requires HF_TOKEN):
+# python train.py \
+#     --model_type bart \
+#     --base_model_name facebook/m2m100_418M \
+#     --use_lora \
+#     --push_to_hub \
+#     --hub_model_id_prefix your-username/m2m100-ha-lora-corrector \
+#     --hf_token "hf_YOUR_API_TOKEN" \
+#     --train_file /content/drive/MyDrive/Thesis_Data/train.tsv \
+#     --val_file /content/drive/MyDrive/Thesis_Data/validation.tsv \
+#     --mount_drive \
+#     --source_lang_code ha_NG \
+#     --target_lang_code ha_NG \
+#     --lora_r 8 \
+#     --lora_alpha 16 \
+#     --lora_learning_rate 5e-4 \
+#     --train_batch_size 4 \
+#     --gradient_accumulation_steps 8 \
+#     --num_epochs 5 \
+#     --max_seq_length 256
+#
+# LoRA fine-tuning with reduced data size for quick testing:
+# python train.py \
+#     --model_type t5 \
+#     --base_model_name castorini/afriteva_small \
+#     --use_lora \
+#     --train_file ./data/train.tsv \
+#     --val_file ./data/validation.tsv \
+#     --output_dir_base ./t5_lora_small_test \
+#     --train_size 1000 \
+#     --val_size 100 \
+#     --num_epochs 1 \
+#     --lora_r 4 \
+#     --lora_learning_rate 1e-3
