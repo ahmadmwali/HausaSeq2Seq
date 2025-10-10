@@ -274,7 +274,7 @@ If you use this work, please cite the original paper:
 
 ## License
 
-This project is licensed under the Creative Commons Attribution 4.0 International License (CC-BY-4.0). See the `LICENSE.md` file for details.
+This project is licensed under the Creative Commons Attribution 4.0 International License (CC-BY-4.0).
 
 ## Contact & Contributions
 
