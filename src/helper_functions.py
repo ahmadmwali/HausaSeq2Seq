@@ -80,6 +80,25 @@ def compute_meteor(pred, label):
     except Exception:
         return 0.0
 
+def compute_metrics_str(predictions, references):
+    metrics_scores = {"bleu": [], "f1": [], "wer": [], "cer": [], "meteor": []}
+    for pred, label in zip(predictions, references):
+        if not label: continue
+        metrics_scores["bleu"].append(compute_bleu(pred, label))
+        metrics_scores["meteor"].append(compute_meteor(pred, label))
+        metrics_scores["f1"].append(compute_token_f1(pred, label))
+        metrics_scores["wer"].append(compute_wer(pred, label))
+        metrics_scores["cer"].append(compute_cer(pred, label))
+
+    result = {
+        "eval_bleu": np.mean(metrics_scores["bleu"]) if metrics_scores["bleu"] else 0.0,
+        "eval_meteor": np.mean(metrics_scores["meteor"]) if metrics_scores["meteor"] else 0.0,
+        "eval_f1": np.mean(metrics_scores["f1"]) if metrics_scores["f1"] else 0.0,
+        "eval_wer": np.mean(metrics_scores["wer"]) if metrics_scores["wer"] else 1.0,
+        "eval_cer": np.mean(metrics_scores["cer"]) if metrics_scores["cer"] else 1.0
+    }
+    return result
+
 def compute_metrics(eval_preds):
     global tokenizer_instance
     if tokenizer_instance is None:
@@ -167,3 +186,4 @@ def preprocess_function(examples, max_seq_length, model_type):
 
     inputs['labels'] = targets['input_ids']
     return inputs
+
