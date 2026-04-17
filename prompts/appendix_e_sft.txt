@@ -1,0 +1,7 @@
+### Instruction:
+Correct the noisy Hausa text below into a clean, grammatically correct version. Do not change the structure of the sentence.
+
+### Input:
+{noisy}
+
+### Response:

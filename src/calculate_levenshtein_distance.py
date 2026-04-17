@@ -1,207 +1,515 @@
-import pandas as pd
+"""
+calculate_levenshtein_distance.py
+
+Validates the synthetic noise pipeline by comparing the error distribution of:
+  - Natural noisy Twitter Hausa data  (reference)
+  - Synthetically noised formal Hausa text  (generated)
+
+If the two Levenshtein distance distributions align, it confirms that the
+synthetic noise pipeline (Table 1 params) is a good proxy for real Twitter noise
+— justifying its use as seq2seq training data for text normalisation.
+
+Pipeline:
+  1. Download clean formal Hausa text from GDrive via gdown.
+  2. Load Twitter data  →  N = len(twitter_df).
+  3. Randomly sample ~N sentences from the clean formal text.
+  4. Apply synthetic noise (Table 1 params) to each sampled sentence.
+  5. Compute pairwise normalised Levenshtein distances within length-bucketed
+     word groups for both corpora.
+  6. Run DBSCAN clustering and plot distance + cluster-size distributions.
+
+Usage:
+    python src/calculate_levenshtein_distance.py
+"""
+
 import re
-from nltk.corpus import words as nltk_words
-from nltk import download
+import os
+import random
+import time
 from collections import defaultdict, Counter
-from sklearn.cluster import DBSCAN
-from sklearn.metrics import pairwise_distances
-from tqdm import tqdm
-import textdistance
+
+import gdown
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
-import argparse
-import os
+import textdistance
+from nltk.corpus import words as nltk_words
+from nltk import download as nltk_download
+from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 
-download('words')
-english_vocab = set(w.lower() for w in nltk_words.words())
 
-def extract_lowercase_words(texts):
-    """Extracts all lowercase purely alphabetic words from a list of texts."""
-    words = []
-    for text in texts:
-        tokens = re.findall(r'\b[a-z]+\b', str(text).lower())  # only lowercase alpha words
-        words.extend(tokens)
-    return words
+# Configuration
 
-def bucket_words(word_list):
-    """Buckets words based on their length into length ranges (L-1 to L+1)."""
-    buckets = defaultdict(list)
-    for word in word_list:
-        # Key is defined by length-1 and length+1, e.g., a 5-char word goes into "4_6"
-        key = f"{len(word)-1}_{len(word)+1}"
-        buckets[key].append(word)
-    return buckets
+# GDrive folder containing clean formal Hausa text files
+GDRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1o2Yg0PiU3nI7z24TaVkzu320g65JZfpO"
+DOWNLOAD_DIR      = "./data/supplementary/gdrive_clean_text"
 
-def compute_clusters(buckets, max_words=100):
-    """
-    Clusters typos within each bucket based on Normalized Levenshtein distance
-    using DBSCAN. Returns pairwise distances and cluster sizes.
-    """
-    cluster_sizes = []
-    distances = []
+# Paths
+TWITTER_TRAIN_PATH = "./data/supplementary/twitter_data/train.tsv"
+TOP_WORDS_PATH     = "./data/top_100_hausa_natural.txt"
+PLOT_OUTPUT_DIR    = "./data/supplementary"
 
-    for key, words in tqdm(buckets.items(), desc="Clustering Buckets"):
-        if len(words) < 2:
-            continue
-        sampled_words = list(set(words))[:max_words]  # limit size per bucket for efficiency
-        if len(sampled_words) < 2:
-            continue
-        
-        # Compute pairwise normalized Levenshtein distance
-        dist_matrix = pairwise_distances(
-            [[w] for w in sampled_words],
-            metric=lambda a, b: textdistance.levenshtein.normalized_distance(a[0], b[0])
-        )
-        
-        # Collect upper triangular part of distance matrix
-        distances.extend(dist_matrix[np.triu_indices(len(sampled_words), 1)])
-        
-        # Cluster using DBSCAN
-        clustering = DBSCAN(eps=0.4, min_samples=2, metric='precomputed')
-        labels = clustering.fit_predict(dist_matrix)
-        counts = Counter(labels)
-        for label, count in counts.items():
-            if label != -1:  # ignore noise
-                cluster_sizes.append(count)
-    return distances, cluster_sizes
+# Which column in the Twitter TSV holds the tweet text
+TWEET_COL = "tweet"
 
-def plot_results(natural_dists, synthetic_dists, natural_clusters, synthetic_clusters, output_dir):
-    """Generates and saves the comparison plots."""
+# Files to exclude from the clean corpus (religious texts, per paper)
+EXCLUDE_FILENAMES = {"Bible.txt", "Tanzil.txt"}
+
+# Paper noise configuration from Table 1
+PAPER_NOISE_LEVELS = {
+    "random_spacing":        0.02,
+    "remove_spaces":         0.15,
+    "incorrect_characters":  0.02,
+    "delete_characters":     0.005,
+    "duplicate_characters":  0.01,
+    "substitute_characters": 0.001,
+    "transpose_characters":  0.01,
+    "delete_chunk":          0.0015,
+    "insert_chunk":          0.001,
+}
+
+# Word-level noising probabilities
+PROB_NOISE_FREQUENT_WORD = 0.02
+PROB_NOISE_OTHER_WORD    = 0.40
+
+HAUSA_CHARACTERS = "abcdefghijklmnopqrstuvwxyz'ƙɗɓyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+RANDOM_SEED = 42
+random.seed(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
+
+
+# Data acquisition
+
+def download_gdrive_folder(url: str, output_dir: str) -> str:
+    """Download a GDrive folder using gdown. Skips if already present."""
     os.makedirs(output_dir, exist_ok=True)
-    sns.set(style="whitegrid")
+    existing = [f for f in os.listdir(output_dir) if f.endswith(".txt")]
+    if existing:
+        print(f"Download directory already contains {len(existing)} .txt file(s). Skipping download.")
+        return output_dir
+    print(f"Downloading clean text from GDrive → {output_dir} …")
+    gdown.download_folder(url, output=output_dir, quiet=False, use_cookies=False)
+    print("  Download complete.")
+    return output_dir
 
-    # Normalized Levenshtein Distance Distribution
-    plt.figure(figsize=(12,5))
-    sns.histplot(natural_dists, bins=30, kde=True, color="blue", label="Natural")
-    sns.histplot(synthetic_dists, bins=30, kde=True, color="red", label="Synthetic", alpha=0.5)
-    plt.title("Normalized Levenshtein Distance Distribution")
-    plt.xlabel("Distance")
-    plt.ylabel("Frequency")
-    plt.legend()
-    plt.savefig(os.path.join(output_dir, "levenshtein_distance_distribution.png"))
-    print(f"Saved distance distribution plot to {os.path.join(output_dir, 'levenshtein_distance_distribution.png')}")
+
+def load_clean_sentences(folder: str, exclude: set, encoding: str = "utf-8") -> list:
+    """
+    Read all .txt files in *folder* (excluding names in *exclude*),
+    clean and segment into sentences. Returns a flat list of strings.
+    """
+    all_sentences = []
+    txt_files = sorted(f for f in os.listdir(folder) if f.endswith(".txt"))
+    if not txt_files:
+        print(f"  [warn] No .txt files found in {folder}.")
+        return all_sentences
+    for fname in txt_files:
+        if fname in exclude:
+            print(f"  Skipping excluded file: {fname}")
+            continue
+        fpath = os.path.join(folder, fname)
+        try:
+            with open(fpath, "r", encoding=encoding, errors="replace") as fh:
+                text = fh.read()
+            cleaned   = _clean_text(text)
+            sentences = _segment_sentences(cleaned)
+            print(f"  {fname}: {len(sentences):,} sentences")
+            all_sentences.extend(sentences)
+        except Exception as exc:
+            print(f"  [warn] Could not read {fpath}: {exc}")
+    return all_sentences
+
+
+def _clean_text(text: str) -> str:
+    text = re.sub(r"\[\d+\]", "", text)
+    text = re.sub(r"#\w+", "", text)
+    text = re.sub(r"NBSP", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bshit\b", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _segment_sentences(text: str) -> list:
+    pattern = re.compile(
+        r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<![A-Z]\.)(?<=\.|\?|\!)\s+"
+    )
+    sentences = []
+    for para in text.split("\n"):
+        para = para.strip()
+        if para:
+            sentences.extend(s.strip() for s in pattern.split(para) if s.strip())
+    return sentences
+
+
+# Character-level noise functions
+
+def _random_spacing(text: str, p: float) -> str:
+    if not p or not text:
+        return text
+    out = []
+    for i, ch in enumerate(text):
+        if ch.isalnum() and random.random() < p and i > 0 and text[i - 1] != " ":
+            out.append(" ")
+        out.append(ch)
+    return re.sub(r" +", " ", "".join(out)).strip()
+
+
+def _remove_spaces(text: str, p: float) -> str:
+    if not p or not text:
+        return text
+    chars = list(text)
+    for i in range(len(chars) - 2, 0, -1):
+        if chars[i] == " " and chars[i - 1] != " " and chars[i + 1] != " ":
+            if random.random() < p:
+                chars.pop(i)
+    return "".join(chars).strip()
+
+
+def _incorrect_characters(text: str, p: float) -> str:
+    if not p or not text:
+        return text
+    rmap = {"ɓ": "b", "ɗ": "d", "ƙ": "k", "ƴ": "y",
+            "Ɓ": "B", "Ɗ": "D", "Ƙ": "K", "Ƴ": "Y"}
+    chars = list(text)
+    for i, ch in enumerate(chars):
+        if ch in rmap and random.random() < p:
+            chars[i] = rmap[ch]
+    return "".join(chars)
+
+
+def _delete_characters(text: str, p: float) -> str:
+    if not p or not text:
+        return text
+    return "".join(ch for ch in text if ch == " " or random.random() > p)
+
+
+def _duplicate_characters(text: str, p: float) -> str:
+    if not p or not text:
+        return text
+    out = []
+    for ch in text:
+        out.append(ch)
+        if ch != " " and random.random() < p:
+            out.append(ch)
+    return "".join(out)
+
+
+def _substitute_characters(text: str, p: float) -> str:
+    if not p or not text:
+        return text
+    chars = list(text)
+    for i, ch in enumerate(chars):
+        if ch != " " and random.random() < p:
+            chars[i] = random.choice(HAUSA_CHARACTERS)
+    return "".join(chars)
+
+
+def _transpose_characters(text: str, p: float) -> str:
+    if not p or not text or len(text) < 2:
+        return text
+    chars = list(text)
+    i = 0
+    while i < len(chars) - 1:
+        if chars[i] != " " and chars[i + 1] != " " and random.random() < p:
+            chars[i], chars[i + 1] = chars[i + 1], chars[i]
+            i += 2
+        else:
+            i += 1
+    return "".join(chars)
+
+
+def _delete_chunk(text: str, p: float, size: int = 2) -> str:
+    if not p or not text or len(text) < size:
+        return text
+    out, idx = [], 0
+    while idx < len(text):
+        chunk = text[idx: idx + size]
+        if len(chunk) == size and any(c != " " for c in chunk) and random.random() < p:
+            idx += size
+        else:
+            out.append(text[idx])
+            idx += 1
+    return "".join(out)
+
+
+def _insert_chunk(text: str, p: float, size: int = 2) -> str:
+    if not p:
+        return text
+    if not text:
+        return (
+            "".join(random.choice(HAUSA_CHARACTERS) for _ in range(size))
+            if random.random() < p else text
+        )
+    out = []
+    for ch in text:
+        out.append(ch)
+        if ch != " " and random.random() < p:
+            out.extend(random.choice(HAUSA_CHARACTERS) for _ in range(size))
+    if random.random() < p / 20:
+        out = [random.choice(HAUSA_CHARACTERS) for _ in range(size)] + out
+    return "".join(out)
+
+
+# Word-level differential noising
+
+def _noise_word(word: str, noise: dict) -> str:
+    w = _incorrect_characters(word, noise.get("incorrect_characters", 0))
+    w = _substitute_characters(w,   noise.get("substitute_characters", 0))
+    w = _delete_characters(w,       noise.get("delete_characters", 0))
+    w = _delete_chunk(w,            noise.get("delete_chunk", 0))
+    w = _duplicate_characters(w,    noise.get("duplicate_characters", 0))
+    w = _insert_chunk(w,            noise.get("insert_chunk", 0))
+    w = _transpose_characters(w,    noise.get("transpose_characters", 0))
+    return w
+
+
+def apply_noise(sentence: str, noise: dict, top_words: set,
+                prob_freq: float, prob_other: float) -> str:
+    """
+    Apply differential character-level noise to *sentence*.
+    Words in *top_words* (frequent natural words) are noised with *prob_freq*;
+    all other words with *prob_other*. Spacing noise is applied sentence-wide.
+    """
+    if not sentence:
+        return ""
+    parts  = re.split(r"(\s+)", sentence)
+    noised = []
+    for part in parts:
+        if not part.strip():
+            noised.append(part)
+            continue
+        threshold = prob_freq if (top_words and part.lower() in top_words) else prob_other
+        noised.append(_noise_word(part, noise) if random.random() < threshold else part)
+    result = "".join(noised)
+    result = _random_spacing(result, noise.get("random_spacing", 0))
+    result = _remove_spaces(result,  noise.get("remove_spaces",  0))
+    return re.sub(r"\s+", " ", result).strip()
+
+
+# Analysis helpers
+
+def load_top_words(path: str) -> set:
+    if not path or not os.path.exists(path):
+        print(f"  [warn] top-words file not found: {path}")
+        return set()
+    with open(path, "r", encoding="utf-8") as fh:
+        return {line.strip().lower() for line in fh if line.strip()}
+
+
+def extract_non_english_tokens(texts: list, en_vocab: set, min_len: int = 3) -> list:
+    """Return tokens that are not in the English vocab (proxy for Hausa/noisy words)."""
+    tokens = []
+    for text in texts:
+        for tok in re.findall(r"\b[a-z']+\b", str(text).lower()):
+            if tok not in en_vocab and len(tok) >= min_len:
+                tokens.append(tok)
+    return tokens
+
+
+def comparison_groups(word_list: list) -> list:
+    """
+    Group unique words into overlapping windows of length [L-1, L, L+1].
+    Returns a list of word lists.
+    """
+    by_len = defaultdict(list)
+    for w in set(word_list):
+        by_len[len(w)].append(w)
+    groups = []
+    for length in sorted(by_len):
+        group = list(by_len[length])
+        if length - 1 in by_len:
+            group.extend(by_len[length - 1])
+        if length + 1 in by_len:
+            group.extend(by_len[length + 1])
+        unique = sorted(set(group))
+        if len(unique) >= 2:
+            groups.append(unique)
+    return groups
+
+
+def compute_distances_and_clusters(
+    groups: list,
+    max_per_group: int = 200,
+    eps: float = 0.4,
+    min_samples: int = 2,
+) -> tuple:
+    all_dists, cluster_sizes = [], []
+    for group in tqdm(groups, desc="  Processing groups"):
+        if len(group) < 2:
+            continue
+        sample = random.sample(group, max_per_group) if len(group) > max_per_group else group
+        if len(sample) < 2:
+            continue
+        dm = np.array(
+            [[textdistance.levenshtein.normalized_distance(a, b) for b in sample]
+             for a in sample]
+        )
+        idx = np.triu_indices(len(sample), k=1)
+        if idx[0].size:
+            all_dists.extend(dm[idx].tolist())
+        if len(sample) >= min_samples:
+            try:
+                labels = DBSCAN(
+                    eps=eps, min_samples=min_samples, metric="precomputed"
+                ).fit_predict(dm)
+                for lbl, cnt in Counter(labels).items():
+                    if lbl != -1:
+                        cluster_sizes.append(cnt)
+            except Exception as exc:
+                print(f"  [warn] DBSCAN error: {exc}")
+    return all_dists, cluster_sizes
+
+
+# Plotting
+
+def plot_distributions(nat_dists, syn_dists, nat_clusters, syn_clusters, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+
+    # — Distance distribution —
+    fig, ax = plt.subplots(figsize=(10, 5))
+    if nat_dists:
+        sns.histplot(nat_dists, bins=30, kde=True, color="steelblue",
+                     label="Twitter (natural)", stat="density", ax=ax)
+    if syn_dists:
+        sns.histplot(syn_dists, bins=30, kde=True, color="tomato",
+                     label="Synthetic", stat="density", alpha=0.65, ax=ax)
+    ax.set_title(
+        "Normalised Levenshtein Distance Distribution\n"
+        "(within length-bucketed comparison groups)"
+    )
+    ax.set_xlabel("Normalised Levenshtein Distance")
+    ax.set_ylabel("Density")
+    ax.legend()
+    plt.tight_layout()
+    p1 = os.path.join(out_dir, "lev_distance_distribution.png")
+    plt.savefig(p1, dpi=150)
     plt.close()
+    print(f"  Saved → {p1}")
 
-    # Typo Cluster Size Distribution
-    plt.figure(figsize=(12,5))
-    sns.histplot(natural_clusters, bins=30, color="blue", label="Natural", alpha=0.8, stat="density", common_norm=False)
-    sns.histplot(synthetic_clusters, bins=30, color="red", label="Synthetic", alpha=0.5, stat="density", common_norm=False)
-    plt.title("Typo Cluster Sizes (DBSCAN $\\epsilon=0.4$, $min\_samples=2$)")
-    plt.xlabel("Cluster Size")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.savefig(os.path.join(output_dir, "typo_cluster_size_distribution.png"))
-    print(f"Saved cluster size distribution plot to {os.path.join(output_dir, 'typo_cluster_size_distribution.png')}")
+    # Cluster size distribution
+    fig, ax = plt.subplots(figsize=(10, 5))
+    if nat_clusters:
+        sns.histplot(nat_clusters, color="steelblue", label="Twitter (natural)",
+                     discrete=True, ax=ax)
+    if syn_clusters:
+        sns.histplot(syn_clusters, color="tomato", label="Synthetic",
+                     discrete=True, alpha=0.65, ax=ax)
+    ax.set_title("DBSCAN Cluster Size Distribution")
+    ax.set_xlabel("Cluster Size")
+    ax.set_ylabel("Frequency")
+    ax.legend()
+    plt.tight_layout()
+    p2 = os.path.join(out_dir, "cluster_size_distribution.png")
+    plt.savefig(p2, dpi=150)
     plt.close()
+    print(f"  Saved → {p2}")
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Calculate and compare Levenshtein distance and cluster sizes between natural and synthetic typos.")
-    parser.add_argument(
-        "--natural_file",
-        type=str,
-        default="/content/Files/sent_train.tsv",
-        help="Path to the natural language dataset TSV file (e.g., Twitter data)."
-    )
-    parser.add_argument(
-        "--synthetic_file",
-        type=str,
-        default="/content/Files/train.tsv",
-        help="Path to the synthetic noise dataset TSV file."
-    )
-    parser.add_argument(
-        "--natural_text_col",
-        type=str,
-        default="tweet",
-        help="Name of the column containing text in the natural dataset."
-    )
-    parser.add_argument(
-        "--synthetic_text_col",
-        type=str,
-        default="Noisy",
-        help="Name of the column containing noisy text in the synthetic dataset."
-    )
-    parser.add_argument(
-        "--max_words_per_bucket",
-        type=int,
-        default=100,
-        help="Maximum number of unique words to sample per length bucket for clustering (to manage runtime)."
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="./levenshtein_analysis_results",
-        help="Directory to save the generated plots."
-    )
-    return parser.parse_args()
 
+def print_stats(arr, label):
+    if not arr:
+        print(f"  {label}: no data")
+        return
+    a = np.array(arr)
+    print(f"  {label}: n={len(a):,}  mean={a.mean():.4f}  "
+          f"median={np.median(a):.4f}  std={a.std():.4f}")
+
+
+# Main
 
 def main():
-    args = parse_args()
+    t0 = time.time()
+    sns.set(style="whitegrid")
 
-    # Load your datasets
-    print(f"Loading natural data from: {args.natural_file}")
-    natural_df = pd.read_csv(args.natural_file, sep='\t')
-    print(f"Loading synthetic data from: {args.synthetic_file}")
-    synthetic_df = pd.read_csv(args.synthetic_file, sep='\t')
+    # Download clean formal Hausa text from GDrive
+    download_gdrive_folder(GDRIVE_FOLDER_URL, DOWNLOAD_DIR)
 
-    # Subsample synthetic dataset to match Twitter dataset size
-    if len(synthetic_df) > len(natural_df):
-        print(f"Subsampling synthetic data from {len(synthetic_df)} to match natural data size: {len(natural_df)}")
-        synthetic_df = synthetic_df.sample(n=len(natural_df), random_state=42)
+    # Load Twitter data, determine target size N
+    print(f"\nLoading Twitter data from {TWITTER_TRAIN_PATH} …")
+    twitter_df = pd.read_csv(TWITTER_TRAIN_PATH, sep="\t")
+    col = TWEET_COL if TWEET_COL in twitter_df.columns else twitter_df.columns[0]
+    twitter_texts = twitter_df[col].dropna().astype(str).tolist()
+    N = len(twitter_texts)
+    print(f"  {N:,} tweets loaded — this is the target sample size.")
 
-    # Extract lowercase words
-    print("Extracting words...")
-    natural_words = extract_lowercase_words(natural_df[args.natural_text_col])
-    synthetic_words = extract_lowercase_words(synthetic_df[args.synthetic_text_col])
+    # Load all clean sentences from the downloaded corpus
+    print(f"\nLoading clean sentences from {DOWNLOAD_DIR} …")
+    clean_sentences = load_clean_sentences(DOWNLOAD_DIR, EXCLUDE_FILENAMES)
+    total_clean = len(clean_sentences)
+    print(f"  Total clean sentences available: {total_clean:,}")
+    if total_clean == 0:
+        raise RuntimeError("No clean sentences loaded. Check the download directory and file contents.")
 
-    # Remove words that are in standard English vocabulary
-    print("Filtering out English vocabulary...")
-    natural_typos = [w for w in natural_words if w not in english_vocab and len(w) > 2]
-    synthetic_typos = [w for w in synthetic_words if w not in english_vocab and len(w) > 2]
-    
-    print(f"Natural typos count: {len(natural_typos)}, Unique: {len(set(natural_typos))}")
-    print(f"Synthetic typos count: {len(synthetic_typos)}, Unique: {len(set(synthetic_typos))}")
+    # Randomly sample ~N clean sentences
+    sample_size = min(N, total_clean)
+    print(f"\nRandomly sampling {sample_size:,} sentences from clean corpus …")
+    sampled_clean = random.sample(clean_sentences, sample_size)
 
-    # Bucket typos based on word length
-    natural_buckets = bucket_words(natural_typos)
-    synthetic_buckets = bucket_words(synthetic_typos)
+    # Apply synthetic noise from Table 1 params
+    print("Loading top Hausa natural words …")
+    top_words = load_top_words(TOP_WORDS_PATH)
+    print(f"  {len(top_words)} words loaded.")
 
-    # Cluster typos based on normalized Levenshtein distance
-    print(f"\nComputing clusters and distances for natural data (max_words/bucket={args.max_words_per_bucket})...")
-    natural_dists, natural_clusters = compute_clusters(natural_buckets, max_words=args.max_words_per_bucket)
-    
-    print(f"\nComputing clusters and distances for synthetic data (max_words/bucket={args.max_words_per_bucket})...")
-    synthetic_dists, synthetic_clusters = compute_clusters(synthetic_buckets, max_words=args.max_words_per_bucket)
-    
-    # Visualization
-    print("\nGenerating plots...")
-    plot_results(natural_dists, synthetic_dists, natural_clusters, synthetic_clusters, args.output_dir)
+    print(f"Applying synthetic noise to {sample_size:,} sampled sentences …")
+    synthetic_noisy = [
+        apply_noise(
+            sentence=s,
+            noise=PAPER_NOISE_LEVELS,
+            top_words=top_words,
+            prob_freq=PROB_NOISE_FREQUENT_WORD,
+            prob_other=PROB_NOISE_OTHER_WORD,
+        )
+        for s in tqdm(sampled_clean, desc="  Noising")
+    ]
 
-    # Top 10 most common words
-    print("\n--- Top 10 Common Typos ---")
-    print("Top 10 Natural (Twitter) words:", Counter(natural_typos).most_common(10))
-    print("Top 10 Synthetic words:", Counter(synthetic_typos).most_common(10))
+    # Load NLTK English vocab (used to filter for Hausa/noisy tokens)
+    print("\nLoading NLTK English vocabulary …")
+    try:
+        nltk_words.words()
+    except LookupError:
+        nltk_download("words")
+    en_vocab = {w.lower() for w in nltk_words.words()}
+
+    # Extract non-English tokens from each corpus
+    print("Extracting non-English tokens …")
+    nat_tokens = extract_non_english_tokens(twitter_texts,   en_vocab)
+    syn_tokens = extract_non_english_tokens(synthetic_noisy, en_vocab)
+    print(f"  Twitter   : {len(nat_tokens):,} tokens  ({len(set(nat_tokens)):,} unique)")
+    print(f"  Synthetic : {len(syn_tokens):,} tokens  ({len(set(syn_tokens)):,} unique)")
+
+    # Build length-bucketed comparison groups
+    print("\nBuilding comparison groups (word length ±1 windows) …")
+    nat_groups = comparison_groups(nat_tokens)
+    syn_groups = comparison_groups(syn_tokens)
+    print(f"  Twitter   : {len(nat_groups)} groups")
+    print(f"  Synthetic : {len(syn_groups)} groups")
+
+    # Compute pairwise Levenshtein distances + DBSCAN clusters
+    print("\nComputing distances + clusters — Twitter data …")
+    nat_dists, nat_clusters = compute_distances_and_clusters(nat_groups)
+
+    print("\nComputing distances + clusters — Synthetic data …")
+    syn_dists, syn_clusters = compute_distances_and_clusters(syn_groups)
+
+    # Plot
+    print("\nPlotting …")
+    plot_distributions(nat_dists, syn_dists, nat_clusters, syn_clusters, PLOT_OUTPUT_DIR)
+
+    # Print summary statistics
+    print("\nDistance distribution summary:")
+    print_stats(nat_dists,    "Twitter   distances")
+    print_stats(syn_dists,    "Synthetic distances")
+
+    print("\nCluster size summary:")
+    print_stats(nat_clusters, "Twitter   cluster sizes")
+    print_stats(syn_clusters, "Synthetic cluster sizes")
+
+    print(f"\nTop-20 most frequent natural  tokens : {Counter(nat_tokens).most_common(20)}")
+    print(f"Top-20 most frequent synthetic tokens : {Counter(syn_tokens).most_common(20)}")
+
+    print(f"\nFinished in {time.time() - t0:.1f}s.")
+
 
 if __name__ == "__main__":
     main()
-
-# Example Usage:
-#
-# 1. Run with default file paths:
-# python calculate_levenshtein_distance.py
-#
-# 2. Run with custom file paths and output directory:
-# python calculate_levenshtein_distance.py \
-#     --natural_file /path/to/my/twitter_data.tsv \
-#     --synthetic_file /path/to/my/synthetic_data.tsv \
-#     --natural_text_col 'text_column' \
-#     --synthetic_text_col 'error_column' \
-#     --max_words_per_bucket 200 \
-#     --output_dir ./custom_analysis_plots
-#
-# 3. Run with local files (assuming files are in the current directory, if running locally outside of Colab:
-# python calculate_levenshtein_distance.py \
-#     --natural_file ./sent_train.tsv \
-#     --synthetic_file ./train.tsv \
-#     --output_dir ./local_results

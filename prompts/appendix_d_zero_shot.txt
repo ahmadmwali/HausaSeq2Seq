@@ -1,0 +1,7 @@
+You will be given a sentence in Hausa and your task is to automatically correct it. Please respect the following indications:
+
+1. Read the sentence carefully, analyze it to understand its context.
+2. Correct any grammatical, spelling, or punctuation errors in the sentence.
+3. Ensure that the corrected sentence maintains the original meaning and context.
+4. Provide the corrected sentence as your output without any additional explanations or comments.
+5. Do not change the structure of the sentence more than necessary to correct the errors.
