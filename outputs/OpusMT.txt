@@ -1,0 +1,55 @@
+Model: ahmadmwali/opus_mt_trial2 (t5, LoRA: True)
+Test File Used for Sampling Pool: /work/HauSeq/data/trial_2/test.tsv
+Total Samples in Sampling Pool (after cleaning): 5000
+Number of Samples Logged: 10
+==================================================
+
+--- Sample 1 (Original Index in Sampling Pool: 912) ---
+Input (Noisy):     A ranar 1 gaMayu, 2020, NRG ta rufe Petra Nova,tana yin la'akari da ƙarancinfarashin mai y ayin bala'in COVID-19.
+Prediction:        A ranar 1 ga Satumba, shekarar, NRG ta rufe [ 1 ] , tana yin la 'akari da ƙarancinfa rashin mai ya jin bala 'ayin CCIndeed.
+Reference (Clean): A ranar 1 ga Mayu, 2020, NRG ta rufe Petra Nova, tana yin la'akari da ƙarancin farashin mai yayin bala'in COVID-19.
+
+--- Sample 2 (Original Index in Sampling Pool: 204) ---
+Input (Noisy):     A lokacin da Y esuya tafi giciye a matsayin mu na babban firist, Ya ba mu damar yinamfani daAllah na Univers e.
+Prediction:        A lokacin da Yesu ya tafi daban a matsayin mu na babban firist, Ya ba mu damar yin amfani da Allah na farko.
+Reference (Clean): A lokacin da Yesu ya tafi giciye a matsayin mu na babban firist, Ya ba mu damar yin amfani da Allah na Universe.
+
+--- Sample 3 (Original Index in Sampling Pool: 2253) ---
+Input (Noisy):     YankinAshantiYankinAshanti na Ghana yaƙunshi gundumomii 30.
+Prediction:        kasar kasar Kankin A haƙĩƙatanti na Ghana ya buga shi (i 30 ) .
+Reference (Clean): Yankin Ashanti Yankin Ashanti na Ghana ya ƙunshi gundumomi 30.
+
+--- Sample 4 (Original Index in Sampling Pool: 2006) ---
+Input (Noisy):     Wannan ma'adanin ta buɗea ƙars hen shek arar 1950s kuma tana riƙe isasshen gaway i don s amar da ton ɗari biyar aranatsawon shekaru bakwai.
+Prediction:        Wannan ma'adanin ta buɗe a ƙars  ( arar 1950s kuma tana riƙe wasan ga 18 ga shekara da ton ɗari biyar a ranar tsawon shekaru bakwai.
+Reference (Clean): Wannan ma'adanin ta buɗe a ƙarshen shekarar 1950s kuma tana riƙe isasshen gawayi don samar da ton ɗari biyar a rana tsawon shekaru bakwai.
+
+--- Sample 5 (Original Index in Sampling Pool: 1828) ---
+Input (Noisy):     Shikongo shine zakaran tsseren gudun mita 100 dakuma200maT11(classification ) .
+Prediction:        Shirargo shine wasan rufi (en gudun ( 100 da kuma ) , awaT7 (cl (fi ( ) .
+Reference (Clean): Shikongo shine zakaran tseren gudun mita 100 da kuma 200m a T11 ( classification ) .
+
+--- Sample 6 (Original Index in Sampling Pool: 1143) ---
+Input (Noisy):     [ 1 ] [ 2 ] Daga1992 zuwa 1998 , ya zura ƙ wal laye bakwaia waanni goma sha ukuda a bug a wa tawagar kasar NNijar .
+Prediction:        [ 1 ] [ 2 ] Daga shekarar 20 zuwa 1998 , ya jefa ɓangare wal laye bakwai a wa shekaru goma sha uku da a dũka a wa ƙungiya kasar N Ni Ni ( ) .
+Reference (Clean): [ 1 ] [ 2 ] Daga 1992 zuwa 1998 , ya zura ƙwallaye bakwai a wasanni goma sha uku da ya buga wa tawagar kasar Nijar .
+
+--- Sample 7 (Original Index in Sampling Pool: 839) ---
+Input (Noisy):     Kafin lashe MB GN , Darego ta fito a tall ace-tallace na kayan kwalliya kamar su sarka Collectables ,kuma waɗannan mata yadda ake bukatarsa aMis s Universe akagayyace ta Naomi Campbel lsu shiga a Frock ' n ' Roll - sadaka fashion show a Barcelona , nanda nansulhu a tallan kayankawa da yawa tare da trump Gudanar da Samfura aAmurka .
+Prediction:        Kafin lashe MB GN , asubago ta fito a tallace- tara na kayan kwalliya kamar su saiya Collec yous , kuma waɗannan mata yadda ake amfani a magabi ta Naomi ( Dae su shiga a matsayin 'n sadaka 'n Rollon fashik a Bagna nan , da su na kayan ƙungiya da yawa tare da yawa da yawa daya a .
+Reference (Clean): Kafin lashe MBGN , Darego ta fito a tallace-tallace na kayan kwalliya kamar su sarka Collectables , kuma waɗannan mata yadda ake bukatar sa a Miss Universe aka gayyace ta Naomi Campbell su shiga a Frock ' n ' Roll - sadaka fashion show a Barcelona , nan da nan sulhu a tallan kayan kawa da yawa tare da trump Gudanar da Samfura a Amurka .
+
+--- Sample 8 (Original Index in Sampling Pool: 4467) ---
+Input (Noisy):     VanHeuvelen, Tom (March 1, 2020).
+Prediction:        [ 2 ]Heuveuuuuu , pleases (March 1, [ 1 ] .
+Reference (Clean): VanHeuvelen, Tom (March 1, 2020).
+
+--- Sample 9 (Original Index in Sampling Pool: 712) ---
+Input (Noisy):     Hydrogen chloride, acetic acid , da mai yawansaurna Brønsted-Lowry aci d ba zasu iya samar da haɗin kai tare da nau 'in electron ba , duk da haka , don haka ba Lewis acid ba ne .
+Prediction:        Hy ( Sin , acetic acid , da mai yawan wasa na (n ƙungiya-L purposery aci da ba za su iya samar da haɗin kai tare da nau 'in , duk da haka , don ba haka ba acid ba ne .
+Reference (Clean): Hydrogen chloride , acetic acid , da mafi yawan sauran Brønsted-Lowry acid ba za su iya samar da haɗin kai tare da nau 'in electron ba , duk da haka , don haka ba Lewis acid ba ne .
+
+--- Sample 10 (Original Index in Sampling Pool: 4837) ---
+Input (Noisy):     Du k ad wasu nasarorin farko da sojojin Gobir da na kasar Hausa s ukasamu ( musamman a yakin Tsuntua ) , Dan Fo dio ya samu nasarar mamayeyankin da kekewaye.
+Prediction:        Ina da wasu wasan farko da sojojin Gobir da na kasar Hausa s bakisamu ( musamman a yakin T suntua ) , Dan ( ya samu nasarar mamaye (n da ke amfani .
+Reference (Clean): Duk da wasu nasarorin farko da sojojin Gobir da na kasar Hausa suka samu ( musamman a yakin Tsuntua ) , Dan Fodio ya samu nasarar mamaye yankin da ke kewaye .
